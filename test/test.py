@@ -71,7 +71,7 @@ async def test_project(dut):
     value = await tqv.read_reg(REG_VALUE)
     assert value == 2
 
-    dut._log.info("Test falling edge detection configuration")
+    dut._log.info("Test falling edge detection")
     await tqv.write_reg(REG_CFG, EDGE_FALLING)
     await tqv.write_reg(REG_RESET, 0)
     value = await tqv.read_reg(REG_VALUE)
@@ -100,3 +100,57 @@ async def test_project(dut):
 
     # Test 7-segment output
     assert dut.uo_out.value == 0b01011011  # 2 encoded for seven segment display
+
+    dut._log.info("Test multiple pins configuration")
+    await tqv.write_reg(REG_PINS, 0x06)
+    await tqv.write_reg(REG_CFG, EDGE_RISING)
+    await tqv.write_reg(REG_RESET, 0)
+    dut.ui_in.value = 0x01
+    await ClockCycles(dut.clk, 3)
+    await ClockCycles(dut.clk, 10)
+
+    # Should ignore ui_in[0] rising edge
+    value = await tqv.read_reg(REG_VALUE)
+    assert value == 0
+
+    # Should count 5 rising edges of ui[1]
+    for i in range(5):
+        dut.ui_in.value = 0x02
+        await ClockCycles(dut.clk, 1)
+        dut.ui_in.value = 0
+        await ClockCycles(dut.clk, 1)
+
+    await ClockCycles(dut.clk, 10)
+    value = await tqv.read_reg(REG_VALUE)
+    assert value == 5
+
+    # Should count a rising edge on both ui[1] and ui[2] as a single edge
+    dut.ui_in.value = 0x06
+    await ClockCycles(dut.clk, 1)
+    dut.ui_in.value = 0
+    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 10)
+    value = await tqv.read_reg(REG_VALUE)
+    assert value == 6
+
+    # Should count extra 3 rising edges of ui[2] while ui[1] is high
+    for i in range(3):
+        dut.ui_in.value = 0x06
+        await ClockCycles(dut.clk, 1)
+        dut.ui_in.value = 0x02
+        await ClockCycles(dut.clk, 1)
+
+    await ClockCycles(dut.clk, 10)
+    value = await tqv.read_reg(REG_VALUE)
+    assert value == 9
+
+    # Should ignore changes to other pins while ui[1] is high
+    for i in range(3):
+        dut.ui_in.value = 0x02 # ui[1] is high
+        await ClockCycles(dut.clk, 1)
+        dut.ui_in.value = 0xfb # All pins other than ui[2] are high
+        await ClockCycles(dut.clk, 1)
+
+    await ClockCycles(dut.clk, 10)
+    value = await tqv.read_reg(REG_VALUE)
+    assert value == 9

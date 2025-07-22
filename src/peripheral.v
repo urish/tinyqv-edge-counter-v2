@@ -9,7 +9,8 @@ module tqvp_edge_counter #(
     parameter ADDR_RESET     = 4'h0,  // write = counter ← 0
     parameter ADDR_INCREMENT = 4'h1,  // write = counter ← counter + 1
     parameter ADDR_VALUE     = 4'h2,  // read / write = counter
-    parameter ADDR_CFG       = 4'h3   // read / write = edge-count config
+    parameter ADDR_CFG       = 4'h3,  // read / write = edge-count config
+    parameter ADDR_PINS      = 4'h4   // read / write = bitmask of ui_in pins to count edges on
 ) (
     input clk,
     input rst_n,
@@ -30,23 +31,25 @@ module tqvp_edge_counter #(
   //----------------------------------------------------------------------
   reg  [7:0] counter;
   reg  [1:0] cfg;  // 0 = no count, 1 = rising, 2 = falling
-  reg        ui0_prev;
+  reg  [7:0] pins;  // bitmask of ui_in pins to count edges on
+  reg  [7:0] input_prev;
 
   //----------------------------------------------------------------------
   // Edge detection (sampled synchronously)
   //----------------------------------------------------------------------
-  wire       ui0_now = ui_in[0];
-  wire       rising_edge = ui0_now & ~ui0_prev;
-  wire       falling_edge = ~ui0_now & ui0_prev;
+  wire [7:0] input_now = ui_in & pins;
+  wire       rising_edge = |{input_now & ~input_prev};
+  wire       falling_edge = |{~input_now & input_prev};
 
   //----------------------------------------------------------------------
   // Main sequential block
   //----------------------------------------------------------------------
   always @(posedge clk) begin
     if (!rst_n) begin
-      counter  <= 8'd0;
-      cfg      <= 2'd0;
-      ui0_prev <= ui0_now;
+      counter    <= 8'd0;
+      cfg        <= 2'd0;
+      pins       <= 8'd1;
+      input_prev <= input_now;
     end else begin
       // ---------- register writes ----------
       if (data_write) begin
@@ -55,6 +58,7 @@ module tqvp_edge_counter #(
           ADDR_INCREMENT: counter <= counter + 8'd1;  // any value ignored
           ADDR_VALUE:     counter <= data_in;
           ADDR_CFG:       cfg <= data_in[1:0];
+          ADDR_PINS:      pins <= data_in;
           default:        ;  // no side-effect
         endcase
       end
@@ -63,8 +67,8 @@ module tqvp_edge_counter #(
       if (cfg == 2'd1 && rising_edge) counter <= counter + 8'd1;
       if (cfg == 2'd2 && falling_edge) counter <= counter + 8'd1;
 
-      // remember current ui0 for next cycle
-      ui0_prev <= ui0_now;
+      // remember current input for next cycle
+      input_prev <= input_now;
     end
   end
 
@@ -74,6 +78,7 @@ module tqvp_edge_counter #(
   assign data_out =
            (address == ADDR_VALUE) ? counter :
            (address == ADDR_CFG)   ? {6'b0, cfg} :
+           (address == ADDR_PINS)  ? pins :
            8'h00;   // ADDR_RESET / ADDR_INCREMENT or undefined addrs
 
   //----------------------------------------------------------------------
